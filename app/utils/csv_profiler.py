@@ -20,12 +20,12 @@ def detect_column_type(col_name: str, sample_values: pd.Series) -> str:
     if any(keyword in col_lower for keyword in date_keywords):
         return 'date'
 
-    # Check if column contains datetime-like data
+    # Check if column contains datetime-like data (must parse successfully)
     try:
-        pd.to_datetime(sample_values.head(), errors='coerce', format='mixed')
-        if sample_values.head().notna().any():
+        parsed = pd.to_datetime(sample_values.head(), errors='coerce', format='mixed')
+        if parsed.notna().mean() >= 0.6:
             return 'date'
-    except:
+    except Exception:
         pass
 
     return 'other'
@@ -41,12 +41,15 @@ def profile_csv(df: pd.DataFrame) -> List[Dict]:
         if dtype.startswith('int') or dtype.startswith('float'):
             inferred_type = "numeric"
         elif dtype == 'object':
-            # Check if looks like date
+            # Check if looks like date (majority parseable)
             try:
-                pd.to_datetime(df[col].head(), errors='coerce', format='mixed')
-                inferred_type = "date"
-                semantic_type = 'date'
-            except:
+                parsed = pd.to_datetime(df[col].head(), errors='coerce', format='mixed')
+                if parsed.notna().mean() >= 0.6:
+                    inferred_type = "date"
+                    semantic_type = 'date'
+                else:
+                    inferred_type = "string"
+            except Exception:
                 inferred_type = "string"
         elif dtype.startswith('datetime'):
             inferred_type = "date"

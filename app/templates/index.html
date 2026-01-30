@@ -3,203 +3,109 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CSV Q&A Analytics</title>
+    <title>CSV Q&A Chat</title>
 
-    <!-- Bootstrap 5 CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-
-    <!-- Chart.js -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
-    <!-- Custom CSS -->
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
     <link href="/static/css/styles.css" rel="stylesheet">
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
-    <!-- Header -->
-    <header class="app-header">
-        <div class="container">
-            <div class="text-center">
-                <h1><i class="fas fa-chart-line me-3"></i>CSV Q&A Analytics</h1>
-                <p class="subtitle">Transform your CSV data into insights with AI-powered queries</p>
+    <div class="app-bg" aria-hidden="true"></div>
+
+    <header class="hero">
+        <div class="container hero-inner">
+            <div class="brand">
+                <div class="logo">CSV</div>
+                <div>
+                    <h1>CSV Q&A Chat</h1>
+                    <p>Upload a dataset, chat with it, and visualize answers instantly.</p>
+                </div>
+            </div>
+            <div class="hero-badges">
+                <span class="badge badge-soft">FastAPI</span>
+                <span class="badge badge-soft">DuckDB</span>
+                <span class="badge badge-soft">OpenAI</span>
             </div>
         </div>
     </header>
 
-    <!-- Main Content -->
-    <main class="container main-container my-5">
-        <!-- Upload Section -->
-        <section id="uploadSection" class="upload-section mb-5">
-            <div class="row align-items-center">
-                <div class="col-lg-8">
-                    <h3 class="mb-3"><i class="fas fa-upload me-2"></i>Upload Your CSV File</h3>
-                    <p class="mb-4 text-white-50">Upload a CSV file to automatically analyze its structure and start asking questions about your data.</p>
-
-                    <form id="uploadForm" enctype="multipart/form-data" class="row g-3">
-                        <div class="col-md-8">
-                            <input class="form-control form-control-lg" type="file" id="csvFile" name="file" accept=".csv" required>
-                            <div class="form-text text-white-50">Supported format: CSV files up to 10MB</div>
-                        </div>
-                        <div class="col-md-4">
-                            <button type="submit" class="btn btn-light btn-lg w-100">
-                                <i class="fas fa-cloud-upload-alt me-2"></i>Upload & Analyze
-                            </button>
-                        </div>
-                    </form>
+    <main class="container app-shell">
+        <section class="dock">
+            <div class="panel upload-panel">
+                <div class="panel-header">
+                    <h2>Upload CSV</h2>
+                    <span class="status-pill status-empty" id="datasetStatus">No dataset</span>
                 </div>
-                <div class="col-lg-4 text-center">
-                    <i class="fas fa-file-csv fa-5x text-white-50 mb-3"></i>
-                    <p class="text-white-50">Automatic column detection & semantic analysis</p>
-                </div>
-            </div>
-        </section>
-
-        <!-- Schema Analysis Section -->
-        <section id="schemaSection" class="query-section" style="display: none;">
-            <div class="row">
-                <div class="col-lg-8">
-                    <h3 class="mb-4"><i class="fas fa-search me-2"></i>Ask Questions About Your Data</h3>
-
-                    <div class="alert alert-info mb-4">
-                        <h6><i class="fas fa-info-circle me-2"></i>Dataset Summary</h6>
-                        <div class="row">
-                            <div class="col-md-4">
-                                <div class="stat-card">
-                                    <div class="stat-value" id="schemaColCount">0</div>
-                                    <div class="stat-label">Columns</div>
-                                </div>
-                            </div>
-                        </div>
+                <p class="panel-subtitle">Drop a CSV file to begin exploring your data.</p>
+                <form id="uploadForm" class="upload-form" enctype="multipart/form-data">
+                    <label class="file-drop" for="csvFile">
+                        <input type="file" id="csvFile" name="file" accept=".csv" required>
+                        <span class="file-title">Choose a CSV file</span>
+                        <span class="file-hint">Max 10MB - .csv only</span>
+                    </label>
+                    <button type="submit" id="uploadBtn" class="btn btn-primary">Upload & Analyze</button>
+                </form>
+                <div class="upload-meta">
+                    <div>
+                        <span class="meta-label">File</span>
+                        <strong id="datasetName">N/A</strong>
                     </div>
-
-                    <div class="mb-4">
-                        <label for="question" class="form-label fw-bold">What would you like to know?</label>
-                        <textarea class="form-control form-control-lg" id="question" name="question" rows="3"
-                                placeholder="Examples:
-• Which services were affected by incidents in Mumbai last month?
-• What is the total number of affected users for SEV1 incidents?
-• Show me the average duration of incidents by severity level"></textarea>
-                    </div>
-
-                    <div class="row align-items-center mb-4">
-                        <div class="col-md-8">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" id="useAI" name="use_ai" checked>
-                                <label class="form-check-label fw-bold" for="useAI">
-                                    <i class="fas fa-brain me-2 text-primary"></i>Use AI SQL Generation
-                                </label>
-                                <small class="form-text text-muted">Requires OpenAI API key for intelligent query generation</small>
-                            </div>
-                        </div>
-                        <div class="col-md-4">
-                            <button type="button" id="queryBtn" class="btn btn-success btn-lg w-100">
-                                <span class="spinner-border spinner-border-sm d-none" id="querySpinner" role="status"></span>
-                                <span id="queryBtnText"><i class="fas fa-play me-2"></i>Run Query</span>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="col-lg-4">
-                    <div class="card shadow-sm h-100">
-                        <div class="card-header bg-light">
-                            <h6 class="mb-0"><i class="fas fa-columns me-2"></i>Detected Columns</h6>
-                        </div>
-                        <div class="card-body">
-                            <ul id="columnsList" class="list-group list-group-flush"></ul>
-                        </div>
+                    <div>
+                        <span class="meta-label">Columns</span>
+                        <strong id="datasetColumns">0</strong>
                     </div>
                 </div>
             </div>
+
+            <div class="panel dataset-panel">
+                <div class="panel-header">
+                    <h2>Columns</h2>
+                    <span class="badge badge-solid" id="columnCountBadge">0</span>
+                </div>
+                <div id="columnsList" class="columns-list"></div>
+            </div>
+
+            <div class="panel tips-panel">
+                <div class="panel-header">
+                    <h2>Prompt ideas</h2>
+                </div>
+                <ul class="prompt-list">
+                    <li>Show incidents by service and severity.</li>
+                    <li>Which city had the most outages last month?</li>
+                    <li>Average duration by incident type.</li>
+                </ul>
+            </div>
         </section>
 
-        <!-- Results Section -->
-        <section id="resultsSection" class="results-section" style="display: none;">
-            <div class="card shadow-lg">
-                <div class="card-header results-header">
-                    <h4 class="mb-0"><i class="fas fa-chart-bar me-2"></i>Query Results</h4>
+        <section class="chat">
+            <div class="chat-header">
+                <div>
+                    <h2>Chat with your data</h2>
+                    <p>Ask questions in plain language and get charts inside the conversation.</p>
                 </div>
+                <label class="toggle">
+                    <input type="checkbox" id="useAI" checked>
+                    <span class="toggle-track"></span>
+                    <span class="toggle-label">AI SQL</span>
+                </label>
+            </div>
 
-                <!-- Stats Bar -->
-                <div class="results-stats">
-                    <div class="row text-center">
-                        <div class="col-md-3">
-                            <div class="stat-card">
-                                <div class="stat-value" id="rowCount">0</div>
-                                <div class="stat-label">Rows</div>
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="stat-card">
-                                <div class="stat-value" id="colCount">0</div>
-                                <div class="stat-label">Columns</div>
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="stat-card">
-                                <div class="stat-value" id="queryTime">--</div>
-                                <div class="stat-label">Query Time</div>
-                            </div>
-                        </div>
-                        <div class="col-md-3" id="duplicateInfoContainer" style="display: none;">
-                            <div class="stat-card">
-                                <div class="stat-value" id="duplicateInfo">--</div>
-                                <div class="stat-label">Duplicates Grouped</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+            <div id="chatMessages" class="chat-messages"></div>
 
-                <div class="card-body">
-                    <!-- SQL Query Display -->
-                    <div class="mb-4">
-                        <h6 class="mb-3"><i class="fas fa-code me-2"></i>Generated SQL Query</h6>
-                        <div class="bg-light p-3 rounded">
-                            <pre class="mb-0"><code id="sqlCode" class="language-sql"></code></pre>
-                        </div>
-                    </div>
-
-                    <div class="row">
-                        <!-- Data Table -->
-                        <div class="col-lg-7 mb-4">
-                            <h6 class="mb-3"><i class="fas fa-table me-2"></i>Data Table</h6>
-                            <div class="table-responsive border rounded">
-                                <table id="resultsTable" class="table table-hover table-striped mb-0"></table>
-                            </div>
-                            <div class="mt-3">
-                                <button type="button" id="exportBtn" class="btn btn-outline-primary btn-sm">
-                                    <i class="fas fa-download me-2"></i>Export to CSV
-                                </button>
-                            </div>
-                        </div>
-
-                        <!-- Chart Visualization -->
-                        <div class="col-lg-5">
-                            <h6 class="mb-3"><i class="fas fa-chart-pie me-2"></i>Data Visualization</h6>
-                            <div class="chart-container">
-                                <canvas id="chartCanvas"></canvas>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+            <div class="chat-input">
+                <textarea id="questionInput" rows="2" placeholder="Ask a question about your CSV..." disabled></textarea>
+                <button id="sendBtn" class="btn btn-accent" disabled>Send</button>
             </div>
         </section>
     </main>
 
-    <!-- Footer -->
-    <footer class="bg-dark text-light py-4 mt-5">
-        <div class="container text-center">
-            <p class="mb-0">
-                <i class="fas fa-database me-2"></i>
-                Powered by FastAPI, DuckDB, and OpenAI
-            </p>
+    <footer class="footer">
+        <div class="container">
+            <span>Built for fast CSV exploration with DuckDB + OpenAI.</span>
         </div>
     </footer>
 
-    <!-- Bootstrap JS -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-
-    <!-- Custom JS -->
     <script src="/static/js/app.js"></script>
 </body>
 </html>

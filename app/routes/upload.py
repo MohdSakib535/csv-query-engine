@@ -24,8 +24,13 @@ async def upload_file(file: UploadFile = File(...)):
     try:
         df = pd.read_csv(file.file)
         uploaded_df = df
-        print("uploadeddf in upload.py ------------", uploaded_df)
         columns_info = profile_csv(df)
+        # Cast detected date columns to datetime so DuckDB sees proper types
+        for col in columns_info:
+            if col.get("semantic_type") == "date":
+                col_name = col.get("name")
+                if col_name in df.columns:
+                    df[col_name] = pd.to_datetime(df[col_name], errors="coerce", format="mixed")
         logger.info(f"File uploaded successfully, shape: {df.shape}, columns: {len(columns_info)}")
         return UploadResponse(columns=columns_info)
     except Exception as e:
