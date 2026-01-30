@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  csv-qa-analytics:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app:/app/app
+      - ./.env:/app/.env
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - DEBUG=${DEBUG}
+      - MAX_ROWS_LIMIT=${MAX_ROWS_LIMIT}
+    env_file:
+      - .env
+    command: uvicorn app:app --host 0.0.0.0 --port 8000 --reload
+    restart: unless-stopped

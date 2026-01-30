@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSV Q&A Analytics</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="container mt-5">
+        <h1 class="mb-4">CSV Q&A Analytics</h1>
+        <form id="uploadForm" enctype="multipart/form-data">
+            <div class="mb-3">
+                <label for="csvFile" class="form-label">Upload CSV File</label>
+                <input class="form-control" type="file" id="csvFile" name="file" accept=".csv" required>
+            </div>
+            <button type="submit" class="btn btn-primary">Upload and Analyze</button>
+        </form>
+
+        <div id="schemaSection" class="mt-4" style="display: none;">
+            <h3>CSV Analysis Complete</h3>
+            <div class="alert alert-success">
+                <strong>Detected columns:</strong>
+                <ul id="columnsList" class="mb-0 mt-2"></ul>
+            </div>
+            <div class="mt-3">
+                <label for="question" class="form-label">Ask a Question</label>
+                <input type="text" class="form-control" id="question" name="question" placeholder="e.g., Which services were affected by incidents in Mumbai last month?" required>
+            </div>
+            <div class="form-check mt-2">
+                <input class="form-check-input" type="checkbox" id="useAI" name="use_ai" checked>
+                <label class="form-check-label" for="useAI">
+                    Use AI SQL Generation (requires OpenAI API key)
+                </label>
+            </div>
+            <button type="button" id="queryBtn" class="btn btn-success mt-3 w-100">
+                <span class="spinner-border spinner-border-sm d-none" id="querySpinner" role="status" aria-hidden="true"></span>
+                <span id="queryBtnText">Run Query</span>
+            </button>
+        </div>
+
+        <div id="resultsSection" class="mt-4" style="display: none;">
+            <div class="card shadow-sm">
+                <div class="card-header bg-success text-white">
+                    <h5 class="mb-0">
+                        <i class="fas fa-chart-bar me-2"></i>
+                        Query Results
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <!-- SQL Section -->
+                    <div class="mb-4">
+                        <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#sqlCollapse" aria-expanded="false" aria-controls="sqlCollapse">
+                            <i class="fas fa-code me-1"></i>
+                            Show Generated SQL
+                        </button>
+                        <div class="collapse mt-2" id="sqlCollapse">
+                            <div class="bg-light p-3 rounded">
+                                <pre id="sqlCode" class="mb-0 text-monospace small"></pre>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Summary Stats -->
+                    <div class="row mb-4">
+                        <div class="col-md-4">
+                            <div class="card bg-light">
+                                <div class="card-body text-center">
+                                    <h4 class="text-primary mb-1" id="rowCount">0</h4>
+                                    <small class="text-muted">Rows Returned</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="card bg-light">
+                                <div class="card-body text-center">
+                                    <h4 class="text-info mb-1" id="colCount">0</h4>
+                                    <small class="text-muted">Columns</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="card bg-light">
+                                <div class="card-body text-center">
+                                    <h4 class="text-success mb-1" id="queryTime">--</h4>
+                                    <small class="text-muted">Query Time</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Data Table -->
+                    <div class="mb-4">
+                        <h6 class="mb-3">
+                            <i class="fas fa-table me-2"></i>
+                            Data Table
+                            <button class="btn btn-sm btn-outline-primary ms-2" onclick="exportToCSV()">
+                                <i class="fas fa-download me-1"></i>
+                                Export CSV
+                            </button>
+                        </h6>
+                        <div class="table-responsive border rounded">
+                            <table id="resultsTable" class="table table-hover table-striped mb-0"></table>
+                        </div>
+                    </div>
+
+                    <!-- Chart Section -->
+                    <div>
+                        <h6 class="mb-3">
+                            <i class="fas fa-chart-pie me-2"></i>
+                            Data Visualization
+                        </h6>
+                        <div class="bg-light p-3 rounded">
+                            <canvas id="chartCanvas" style="max-height: 400px;"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let schemaData = null;
+        let queryResults = null;
+
+        document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const response = await fetch('/upload', {
+                method: 'POST',
+                body: formData
+            });
+            const data = await response.json();
+            if (response.ok) {
+                schemaData = data;
+                displaySchema(data);
+                document.getElementById('schemaSection').style.display = 'block';
+            } else {
+                alert('Error: ' + data.detail);
+            }
+        });
+
+        function displaySchema(data) {
+            const columnsList = document.getElementById('columnsList');
+            columnsList.innerHTML = '';
+
+            const countLi = document.createElement('li');
+            countLi.textContent = `Found ${data.columns.length} columns`;
+            columnsList.appendChild(countLi);
+
+            data.columns.forEach(col => {
+                const li = document.createElement('li');
+                const semantic = col.semantic_type ? `, ${col.semantic_type}` : '';
+                li.textContent = `${col.name} (${col.type}${semantic})`;
+                columnsList.appendChild(li);
+            });
+        }
+
+        document.getElementById('queryBtn').addEventListener('click', async () => {
+            const question = document.getElementById('question').value.trim();
+            const useAI = document.getElementById('useAI').checked;
+
+            if (!question) {
+                alert('Please enter a question');
+                return;
+            }
+
+            // Show loading state
+            const queryBtn = document.getElementById('queryBtn');
+            const querySpinner = document.getElementById('querySpinner');
+            const queryBtnText = document.getElementById('queryBtnText');
+
+            queryBtn.disabled = true;
+            querySpinner.classList.remove('d-none');
+            queryBtnText.textContent = 'Running Query...';
+
+            try {
+                const response = await fetch('/query', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        question,
+                        use_ai: useAI
+                    })
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    queryResults = data;
+                    displayResults(data);
+                    document.getElementById('resultsSection').style.display = 'block';
+                } else {
+                    alert('Error: ' + data.detail);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Error running query: ' + error.message);
+            } finally {
+                // Hide loading state
+                queryBtn.disabled = false;
+                querySpinner.classList.add('d-none');
+                queryBtnText.textContent = 'Run Query';
+            }
+        });
+
+        function displayResults(data) {
+            // Show results section with animation
+            const resultsSection = document.getElementById('resultsSection');
+            resultsSection.classList.add('fade-in');
+
+            // Display SQL
+            document.getElementById('sqlCode').textContent = data.sql;
+
+            // Update summary stats
+            document.getElementById('rowCount').textContent = data.rows.length;
+            document.getElementById('colCount').textContent = data.rows.length > 0 ? Object.keys(data.rows[0]).length : 0;
+            document.getElementById('queryTime').textContent = data.execution_time ? data.execution_time.toFixed(2) + 's' : '--';
+
+            // Display table
+            displayTable(data.rows);
+
+            // Display chart
+            renderChart(data);
+        }
+
+        function displayTable(rows) {
+            const table = document.getElementById('resultsTable');
+            table.innerHTML = '';
+
+            if (rows.length === 0) {
+                table.innerHTML = '<tr><td class="text-center text-muted py-4">No results found</td></tr>';
+                return;
+            }
+
+            // Create header
+            const headerRow = table.insertRow();
+            headerRow.className = 'table-dark';
+            Object.keys(rows[0]).forEach(key => {
+                const th = document.createElement('th');
+                th.textContent = key;
+                th.className = 'fw-bold';
+                headerRow.appendChild(th);
+            });
+
+            // Create data rows
+            rows.forEach((row, index) => {
+                const tr = table.insertRow();
+                tr.className = index % 2 === 0 ? 'table-light' : '';
+                Object.values(row).forEach(value => {
+                    const td = tr.insertCell();
+                    td.textContent = value !== null ? value : 'NULL';
+                    td.className = 'align-middle';
+                });
+            });
+        }
+
+        function renderChart(data) {
+            const canvas = document.getElementById('chartCanvas');
+            const ctx = canvas.getContext('2d');
+
+            // Destroy previous chart
+            if (window.chart) {
+                window.chart.destroy();
+            }
+
+            if (data.rows.length === 0) {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = '#6c757d';
+                ctx.font = '16px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('No data to visualize', canvas.width / 2, canvas.height / 2);
+                return;
+            }
+
+            // Determine chart type based on data
+            const columns = Object.keys(data.rows[0]);
+            const numericColumns = columns.filter(col => {
+                return data.rows.some(row => !isNaN(parseFloat(row[col])) && isFinite(row[col]));
+            });
+
+            if (numericColumns.length >= 2) {
+                // Line chart for numeric data
+                const labels = data.rows.map((_, index) => `Row ${index + 1}`);
+                const datasets = numericColumns.slice(0, 3).map((col, index) => ({
+                    label: col,
+                    data: data.rows.map(row => parseFloat(row[col]) || 0),
+                    borderColor: ['#007bff', '#28a745', '#dc3545'][index],
+                    backgroundColor: ['rgba(0, 123, 255, 0.1)', 'rgba(40, 167, 69, 0.1)', 'rgba(220, 53, 69, 0.1)'][index],
+                    fill: false,
+                    tension: 0.1
+                }));
+
+                window.chart = new Chart(ctx, {
+                    type: 'line',
+                    data: { labels, datasets },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { position: 'top' },
+                            title: { display: true, text: 'Data Trends' }
+                        },
+                        scales: {
+                            y: { beginAtZero: true }
+                        }
+                    }
+                });
+            } else if (columns.length >= 2) {
+                // Bar chart for categorical data
+                const categoryCol = columns[0];
+                const valueCol = columns[1] || columns[0];
+
+                const aggregatedData = {};
+                data.rows.forEach(row => {
+                    const key = row[categoryCol];
+                    const value = parseFloat(row[valueCol]) || 1;
+                    aggregatedData[key] = (aggregatedData[key] || 0) + value;
+                });
+
+                window.chart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: Object.keys(aggregatedData),
+                        datasets: [{
+                            label: valueCol,
+                            data: Object.values(aggregatedData),
+                            backgroundColor: 'rgba(0, 123, 255, 0.8)',
+                            borderColor: 'rgba(0, 123, 255, 1)',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { position: 'top' },
+                            title: { display: true, text: 'Data Distribution' }
+                        },
+                        scales: {
+                            y: { beginAtZero: true }
+                        }
+                    }
+                });
+            } else {
+                // Pie chart for single column data
+                const column = columns[0];
+                const aggregatedData = {};
+                data.rows.forEach(row => {
+                    const key = row[column];
+                    aggregatedData[key] = (aggregatedData[key] || 0) + 1;
+                });
+
+                window.chart = new Chart(ctx, {
+                    type: 'pie',
+                    data: {
+                        labels: Object.keys(aggregatedData),
+                        datasets: [{
+                            data: Object.values(aggregatedData),
+                            backgroundColor: [
+                                '#007bff', '#28a745', '#dc3545', '#ffc107', '#6f42c1',
+                                '#e83e8c', '#fd7e14', '#20c997', '#6c757d', '#17a2b8'
+                            ]
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { position: 'right' },
+                            title: { display: true, text: 'Data Composition' }
+                        }
+                    }
+                });
+            }
+        }
+
+        function exportToCSV() {
+            if (!queryResults || !queryResults.rows.length) {
+                alert('No data to export');
+                return;
+            }
+
+            const headers = Object.keys(queryResults.rows[0]);
+            const csvContent = [
+                headers.join(','),
+                ...queryResults.rows.map(row =>
+                    headers.map(header => {
+                        const value = row[header];
+                        // Escape commas and quotes in CSV
+                        if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {
+                            return `"${value.replace(/"/g, '""')}"`;
+                        }
+                        return value;
+                    }).join(',')
+                )
+            ].join('\n');
+
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            const url = URL.createObjectURL(blob);
+            link.setAttribute('href', url);
+            link.setAttribute('download', 'query_results.csv');
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        // Add some CSS animations
+        const style = document.createElement('style');
+        style.textContent = `
+            .fade-in {
+                animation: fadeIn 0.5s ease-in;
+            }
+            @keyframes fadeIn {
+                from { opacity: 0; transform: translateY(20px); }
+                to { opacity: 1; transform: translateY(0); }
+            }
+            .table-responsive {
+                max-height: 400px;
+                overflow-y: auto;
+            }
+            .card {
+                border: none;
+                border-radius: 10px;
+            }
+            .card-header {
+                border-radius: 10px 10px 0 0 !important;
+            }
+        `;
+        document.head.appendChild(style);
+    </script>
+</body>
+</html>
