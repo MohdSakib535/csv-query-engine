@@ -45,7 +45,21 @@ async def run_query(request: QueryRequest):
         con.close()
         logger.info(f"Query executed successfully, rows: {len(result)}")
 
-        rows = result.to_dict('records')
+        # Process results to handle duplicates
+        if len(result) > 0:
+            # Check if there are duplicate rows
+            if result.duplicated().any():
+                # Group by all columns and count
+                grouped = result.groupby(list(result.columns)).size().reset_index(name='count')
+                # Sort by count descending
+                grouped = grouped.sort_values('count', ascending=False)
+                rows = grouped.to_dict('records')
+                logger.info(f"Grouped {len(result)} rows into {len(grouped)} unique combinations")
+            else:
+                rows = result.to_dict('records')
+        else:
+            rows = []
+
         return QueryResult(sql=sql, rows=rows)
     except Exception as e:
         logger.error(f"Error executing query: {str(e)}")

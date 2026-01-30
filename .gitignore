@@ -1,2 +1,4 @@
 .env
 HOW_IT_WORKS.md
+*.pyc
+__pycache__/

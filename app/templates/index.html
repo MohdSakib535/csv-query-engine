@@ -275,6 +275,7 @@
 
             // Determine chart type based on data
             const columns = Object.keys(data.rows[0]);
+            const hasCountColumn = columns.includes('count');
             const numericColumns = columns.filter(col => {
                 return data.rows.some(row => !isNaN(parseFloat(row[col])) && isFinite(row[col]));
             });
@@ -309,14 +310,24 @@
             } else if (columns.length >= 2) {
                 // Bar chart for categorical data
                 const categoryCol = columns[0];
-                const valueCol = columns[1] || columns[0];
+                const valueCol = hasCountColumn ? 'count' : (columns[1] || columns[0]);
 
                 const aggregatedData = {};
-                data.rows.forEach(row => {
-                    const key = row[categoryCol];
-                    const value = parseFloat(row[valueCol]) || 1;
-                    aggregatedData[key] = (aggregatedData[key] || 0) + value;
-                });
+                if (hasCountColumn) {
+                    // Use count column directly
+                    data.rows.forEach(row => {
+                        const key = row[categoryCol];
+                        const value = parseInt(row.count) || 1;
+                        aggregatedData[key] = value;
+                    });
+                } else {
+                    // Manual aggregation
+                    data.rows.forEach(row => {
+                        const key = row[categoryCol];
+                        const value = parseFloat(row[valueCol]) || 1;
+                        aggregatedData[key] = (aggregatedData[key] || 0) + value;
+                    });
+                }
 
                 window.chart = new Chart(ctx, {
                     type: 'bar',
@@ -346,10 +357,21 @@
                 // Pie chart for single column data
                 const column = columns[0];
                 const aggregatedData = {};
-                data.rows.forEach(row => {
-                    const key = row[column];
-                    aggregatedData[key] = (aggregatedData[key] || 0) + 1;
-                });
+
+                if (hasCountColumn && columns.length > 1) {
+                    // Use count column for multi-column data
+                    data.rows.forEach(row => {
+                        const key = row[column];
+                        const value = parseInt(row.count) || 1;
+                        aggregatedData[key] = value;
+                    });
+                } else {
+                    // Manual counting for single column
+                    data.rows.forEach(row => {
+                        const key = row[column];
+                        aggregatedData[key] = (aggregatedData[key] || 0) + 1;
+                    });
+                }
 
                 window.chart = new Chart(ctx, {
                     type: 'pie',
