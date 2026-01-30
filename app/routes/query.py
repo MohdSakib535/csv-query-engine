@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 import duckdb
 import pandas as pd
+import re
 from datetime import date, datetime
 from app.routes import upload
 from app.utils.sql_generator import generate_sql_rule_based, generate_sql_ai, validate_sql
@@ -23,6 +24,30 @@ def _normalize_value(value):
         except Exception:
             pass
     return value
+
+def _looks_like_dataset_query(question: str, columns_info) -> bool:
+    lower = (question or "").lower()
+    if not lower:
+        return False
+
+    column_names = [col.get("name", "").lower() for col in columns_info]
+    if any(name and name in lower for name in column_names):
+        return True
+
+    tokens = set()
+    for name in column_names:
+        for token in re.split(r"[_\\s]+", name):
+            if len(token) >= 3:
+                tokens.add(token)
+    if any(token in lower for token in tokens):
+        return True
+
+    query_keywords = [
+        "count", "average", "avg", "sum", "total", "trend", "top", "distribution",
+        "percentage", "ratio", "group", "by", "compare", "min", "max", "median",
+        "mean", "list", "show", "how many", "how much", "number of"
+    ]
+    return any(keyword in lower for keyword in query_keywords)
 
 def _add_percentage(rows, question: str):
     if not rows:
@@ -76,7 +101,11 @@ async def run_query(request: QueryRequest):
     columns = [col['name'] for col in upload.columns_info]
     logger.info(f"Columns: {columns}")
 
+    if not _looks_like_dataset_query(question, upload.columns_info):
+        raise HTTPException(status_code=400, detail="Sorry, I didn't get your query for this CSV")
+
     try:
+
         if use_ai:
             sql = generate_sql_ai(question, upload.columns_info)
         else:
@@ -118,6 +147,8 @@ async def run_query(request: QueryRequest):
 
         rows = _add_percentage(rows, question)
         return QueryResult(sql=sql, rows=rows)
+    except HTTPException as e:
+        raise e
     except Exception as e:
         logger.error(f"Error executing query: {str(e)}")
         raise HTTPException(status_code=400, detail=f"Error executing query: {str(e)}")

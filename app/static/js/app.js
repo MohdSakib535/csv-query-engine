@@ -346,6 +346,10 @@ class CSVChatApp {
             return { text: 'Date parsing failed. Your date column is likely stored as text. Try reformatting the CSV date column or ask a question without year/month extraction.', tone: 'soft' };
         }
 
+        if (message.toLowerCase().includes("didn't get your query")) {
+            return { text: "Sorry, I didn't get your query for this CSV. Try using column names from the left panel.", tone: 'soft' };
+        }
+
         if (message.includes('Binder Error') || message.includes('Catalog Error') || message.includes('Referenced column') || message.includes('No function matches')) {
             return { text: "Sorry, I didn't get that query for this CSV. Try rephrasing or use available column names.", tone: 'soft' };
         }
