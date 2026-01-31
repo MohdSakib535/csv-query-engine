@@ -18,7 +18,7 @@ A production-grade web application for analyzing CSV data using natural language
 2. Set `OPENAI_API_KEY` in `.env` (required for AI SQL generation)
    - Optional: set `OPENAI_MODEL` (default: `gpt-4o-mini`)
 3. For development: `docker-compose up --build` (auto-reloads on changes)
-4. For local development without Docker: `pip install -r requirements.txt` then `uvicorn app:app --reload`
+4. For local development without Docker: `pip install -r requirements.txt` then `uvicorn main:app --reload`
 
 ## Docker
 

@@ -1,11 +1,14 @@
-from fastapi import APIRouter, HTTPException
-import duckdb
+from fastapi import APIRouter, HTTPException, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
 import pandas as pd
 import re
 from datetime import date, datetime
-from app.routes import upload
+from app.routes.upload import current_dataset, current_columns_info
 from app.utils.sql_generator import generate_sql_rule_based, generate_sql_ai, validate_sql
 from app.schemas.models import QueryRequest, QueryResult
+from app.database.connection import get_db
+from app.database.service import db_service
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -84,9 +87,37 @@ def _add_percentage(rows, question: str):
     return rows
 
 @router.post("/query", response_model=QueryResult)
-async def run_query(request: QueryRequest):
+async def run_query(
+    request: QueryRequest,
+    session: AsyncSession = Depends(get_db)
+):
     logger.info("Query endpoint called")
-    if upload.uploaded_df is None:
+
+    # If no current dataset in memory, try to get the most recent one from database
+    global current_dataset, current_columns_info
+    if current_dataset is None:
+        # Get the most recent dataset
+        result = await session.execute(
+            text("SELECT * FROM datasets ORDER BY created_at DESC LIMIT 1")
+        )
+        dataset_row = result.fetchone()
+        if dataset_row:
+            # Convert to Dataset object
+            from app.database.models import Dataset
+            current_dataset = Dataset(
+                id=dataset_row.id,
+                filename=dataset_row.filename,
+                table_name=dataset_row.table_name,
+                columns_info=dataset_row.columns_info,
+                row_count=dataset_row.row_count,
+                created_at=dataset_row.created_at,
+                updated_at=dataset_row.updated_at
+            )
+            # Use cleaned column names for SQL generation
+            current_columns_info = dataset_row.columns_info
+            logger.info(f"Loaded dataset from database: {current_dataset.table_name}")
+
+    if current_dataset is None:
         logger.error("No CSV uploaded")
         raise HTTPException(status_code=400, detail="No CSV uploaded")
 
@@ -98,57 +129,80 @@ async def run_query(request: QueryRequest):
         logger.error("Question required")
         raise HTTPException(status_code=400, detail="Question required")
 
-    columns = [col['name'] for col in upload.columns_info]
+    columns = [col['name'] for col in current_columns_info]
     logger.info(f"Columns: {columns}")
 
-    if not _looks_like_dataset_query(question, upload.columns_info):
+    if not _looks_like_dataset_query(question, current_columns_info):
         raise HTTPException(status_code=400, detail="Sorry, I didn't get your query for this CSV")
 
     try:
-
         if use_ai:
-            sql = generate_sql_ai(question, upload.columns_info)
+            sql = generate_sql_ai(question, current_columns_info)
         else:
-            sql = generate_sql_rule_based(question, upload.columns_info)
+            sql = generate_sql_rule_based(question, current_columns_info)
         logger.info(f"Generated SQL: {sql}")
+
+        # Convert DuckDB SQL to PostgreSQL SQL
+        sql = _convert_sql_to_postgres(sql, current_dataset.table_name)
+        logger.info(f"Converted PostgreSQL SQL: {sql}")
+        logger.info(f"Table name: {current_dataset.table_name}")
 
         sql = validate_sql(sql, columns)
         logger.info(f"Validated SQL: {sql}")
 
-        con = duckdb.connect()
-        con.register('df', upload.uploaded_df)
-        result = con.execute(sql).fetchdf()
-        con.close()
-        logger.info(f"Query executed successfully, rows: {len(result)}")
+        # Execute query using PostgreSQL
+        raw_rows = await db_service.execute_query(sql, session)
+        logger.info(f"Query executed successfully, rows: {len(raw_rows)}")
 
-        result = result.where(pd.notna(result), None)
+        # Convert to DataFrame for processing
+        if raw_rows:
+            df = pd.DataFrame(raw_rows)
+            df = df.where(pd.notna(df), None)
 
-        # Process results to handle duplicates
-        if len(result) > 0:
-            # Check if there are duplicate rows
-            if result.duplicated().any():
-                # Group by all columns and count
-                grouped = result.groupby(list(result.columns)).size().reset_index(name='count')
-                # Sort by count descending
-                grouped = grouped.sort_values('count', ascending=False)
-                grouped = grouped.where(pd.notna(grouped), None)
-                rows = [
-                    {key: _normalize_value(value) for key, value in row.items()}
-                    for row in grouped.to_dict('records')
-                ]
-                logger.info(f"Grouped {len(result)} rows into {len(grouped)} unique combinations")
+            # Process results to handle duplicates (same logic as before)
+            if len(df) > 0:
+                if df.duplicated().any():
+                    # Group by all columns and count
+                    grouped = df.groupby(list(df.columns)).size().reset_index(name='count')
+                    # Sort by count descending
+                    grouped = grouped.sort_values('count', ascending=False)
+                    grouped = grouped.where(pd.notna(grouped), None)
+                    rows = [
+                        {key: _normalize_value(value) for key, value in row.items()}
+                        for row in grouped.to_dict('records')
+                    ]
+                    logger.info(f"Grouped {len(df)} rows into {len(grouped)} unique combinations")
+                else:
+                    rows = [
+                        {key: _normalize_value(value) for key, value in row.items()}
+                        for row in df.to_dict('records')
+                    ]
             else:
-                rows = [
-                    {key: _normalize_value(value) for key, value in row.items()}
-                    for row in result.to_dict('records')
-                ]
+                rows = []
         else:
             rows = []
 
         rows = _add_percentage(rows, question)
         return QueryResult(sql=sql, rows=rows)
+
     except HTTPException as e:
         raise e
     except Exception as e:
         logger.error(f"Error executing query: {str(e)}")
         raise HTTPException(status_code=400, detail=f"Error executing query: {str(e)}")
+
+def _convert_sql_to_postgres(sql: str, table_name: str) -> str:
+    """Convert DuckDB SQL to PostgreSQL SQL"""
+    # Replace table reference
+    sql = sql.replace('df', table_name)
+
+    # Handle strftime function (DuckDB) to to_char (PostgreSQL)
+    sql = re.sub(r"strftime\('([^']+)', ([^)]+)\)", r"to_char(\2, '\1')", sql)
+
+    # Handle date functions
+    sql = sql.replace('DATE_TRUNC', 'date_trunc')
+
+    # Handle ILIKE for case-insensitive search
+    sql = sql.replace('ILIKE', 'ILIKE')
+
+    return sql
