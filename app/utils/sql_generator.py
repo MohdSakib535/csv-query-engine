@@ -88,8 +88,10 @@ def generate_sql_ai(question: str, columns_info: List[Dict[str, str]]) -> str:
     Current date: {datetime.now().isoformat()}
     Last month range: {get_last_month_range()[0].isoformat()} to {get_last_month_range()[1].isoformat()}
     Use the table name df.
-    Important: Quote column names with double quotes if they contain spaces or special characters, e.g., "Column Name"
-    Ensure the query is safe, only SELECT, and references existing columns.
+    Instructions:
+    - Quote column names that require it with double quotes (e.g., "Column Name").
+    - Only apply aggregates such as AVG, SUM, MIN, or MAX to columns whose reported type is numeric. Do not average, sum, or otherwise aggregate string, boolean, or date columns unless the question explicitly asks for an average date/timestamp; in that case convert the column to seconds with EXTRACT(EPOCH FROM ...) before averaging and wrap the result with TO_TIMESTAMP or TO_CHAR to keep it readable.
+    - Ensure the query is safe, only SELECT, and references existing columns.
     Return only the SQL (no backticks, no explanations).
     """
 

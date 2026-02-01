@@ -3,10 +3,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from typing import AsyncGenerator
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql+asyncpg://postgres:admin@host.docker.internal:5432/csv_analytics"
-)
+# DATABASE_URL = os.getenv(
+#     "DATABASE_URL",
+#     "postgresql+asyncpg://postgres:admin@host.docker.internal:5432/csv_analytics"
+# )
+DATABASE_URL =  "postgresql+asyncpg://postgres:admin@host.docker.internal:5432/csv_analytics"
 
 
 engine = create_async_engine(DATABASE_URL, echo=False)

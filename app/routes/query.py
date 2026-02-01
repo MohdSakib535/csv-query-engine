@@ -16,6 +16,38 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+AVG_FUNCTION_PATTERN = re.compile(
+    r'AVG\(\s*(?:"(?P<quoted>[^"]+)"|(?P<plain>[^\s,)]+))\s*\)',
+    re.IGNORECASE
+)
+
+
+def _date_column_names(columns_info):
+    return {
+        col.get("name")
+        for col in columns_info
+        if col.get("name")
+        and (
+            col.get("type") == "date"
+            or col.get("semantic_type") == "date"
+        )
+    }
+
+
+def _rewrite_avg_on_date_columns(sql: str, columns_info):
+    date_columns = _date_column_names(columns_info)
+    if not date_columns:
+        return sql
+
+    def _replace(match):
+        column_name = match.group("quoted") or match.group("plain")
+        if column_name in date_columns:
+            quoted = f'"{column_name}"'
+            return f"TO_TIMESTAMP(AVG(EXTRACT(EPOCH FROM {quoted})))"
+        return match.group(0)
+
+    return AVG_FUNCTION_PATTERN.sub(_replace, sql)
+
 def _normalize_value(value):
     if value is None:
         return None
@@ -149,6 +181,9 @@ async def run_query(
 
         sql = validate_sql(sql, columns)
         logger.info(f"Validated SQL: {sql}")
+
+        sql = _rewrite_avg_on_date_columns(sql, current_columns_info)
+        logger.info(f"Adjusted SQL for date averages: {sql}")
 
         # Execute query using PostgreSQL
         raw_rows = await db_service.execute_query(sql, session)
