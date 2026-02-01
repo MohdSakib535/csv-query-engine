@@ -245,14 +245,17 @@ async def run_query(
     logger.info("Query plan:\n%s", plan.describe(current_columns_info))
 
     if plan.is_vague():
-        hint = _friendly_column_hint(current_columns_info)
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Could you be more specific about what to analyze? "
-                f"Mention at least one column (e.g., {hint}) and the desired operation or filter."
+        if use_ai:
+            logger.warning("Query plan is vague, but AI is enabled. Proceeding to LLM generation.")
+        else:
+            hint = _friendly_column_hint(current_columns_info)
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Could you be more specific about what to analyze? "
+                    f"Mention at least one column (e.g., {hint}) and the desired operation or filter."
+                )
             )
-        )
 
     sql = ""
     try:
