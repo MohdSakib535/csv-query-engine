@@ -92,8 +92,8 @@ class DatabaseService:
         # Update columns_info to use cleaned column names
         updated_columns_info = []
         for col_info in columns_info:
-            original_name = col_info['name']
-            cleaned_name = column_mapping.get(original_name, original_name)
+            original_name = col_info.get('original_name') or col_info['name']
+            cleaned_name = column_mapping.get(col_info['name'], col_info['name'])
             updated_col_info = col_info.copy()
             updated_col_info['name'] = cleaned_name
             updated_col_info['original_name'] = original_name  # Keep original for display

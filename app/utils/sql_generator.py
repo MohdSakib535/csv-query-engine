@@ -4,6 +4,7 @@ from typing import Dict, List, Optional
 from fastapi import HTTPException
 from app.config import config
 from openai import OpenAI
+from app.utils.query_planner import QueryPlan
 
 def quote_identifier(name: str) -> str:
     """Quote column/table names for SQL safety."""
@@ -31,15 +32,32 @@ def _strip_sql_fences(text: str) -> str:
     return cleaned
 
 def _columns_prompt(columns_info: List[Dict[str, str]]) -> str:
-    parts = []
+    lines = []
     for col in columns_info:
-        name = col.get("name", "")
-        dtype = col.get("type", "unknown")
-        semantic = col.get("semantic_type", "other")
-        parts.append(f"{name} ({dtype}, {semantic})")
-    return ", ".join(parts)
+        display = col.get("original_name") or col.get("name") or "unknown"
+        normalized = col.get("name") or display
+        dtype = col.get("data_type") or col.get("type") or "unknown"
+        semantic = col.get("semantic_type") or "other"
+        lines.append(f"- {display} (db: {normalized}, type: {dtype}, semantic: {semantic})")
+    return "\n".join(lines)
 
-def generate_sql_rule_based(question: str, columns_info: List[Dict[str, str]]) -> str:
+
+def _plan_summary_text(plan: Optional[QueryPlan], columns_info: List[Dict[str, str]]) -> str:
+    if plan:
+        return plan.describe(columns_info)
+
+    return "\n".join([
+        "- Columns referenced: none",
+        "- Filters: none",
+        "- Aggregations: none",
+        "- Sorting: none",
+    ])
+
+def generate_sql_rule_based(
+    question: str,
+    columns_info: List[Dict[str, str]],
+    plan: Optional[QueryPlan] = None
+) -> str:
     question_lower = question.lower()
     select_cols = "*"
     group_by = None
@@ -77,20 +95,29 @@ def generate_sql_rule_based(question: str, columns_info: List[Dict[str, str]]) -
         sql += f" GROUP BY {group_by}"
     return sql
 
-def generate_sql_ai(question: str, columns_info: List[Dict[str, str]]) -> str:
+def generate_sql_ai(
+    question: str,
+    columns_info: List[Dict[str, str]],
+    plan: Optional[QueryPlan]
+) -> str:
     if not config.OPENAI_API_KEY:
         raise HTTPException(status_code=400, detail="OpenAI API key not configured")
 
     columns_text = _columns_prompt(columns_info)
+    plan_text = _plan_summary_text(plan, columns_info)
     prompt = f"""
     Generate a DuckDB SQL SELECT query for the question: "{question}"
-    Available columns (name, type, semantic): {columns_text}
+    Available columns (display, db name, type, semantic):
+    {columns_text}
+    Plan summary:
+    {plan_text}
     Current date: {datetime.now().isoformat()}
     Last month range: {get_last_month_range()[0].isoformat()} to {get_last_month_range()[1].isoformat()}
     Use the table name df.
     Instructions:
-    - Quote column names that require it with double quotes (e.g., "Column Name").
-    - Only apply aggregates such as AVG, SUM, MIN, or MAX to columns whose reported type is numeric. Do not average, sum, or otherwise aggregate string, boolean, or date columns unless the question explicitly asks for an average date/timestamp; in that case convert the column to seconds with EXTRACT(EPOCH FROM ...) before averaging and wrap the result with TO_TIMESTAMP or TO_CHAR to keep it readable.
+    - Quote column names that require it with double quotes (e.g., "Column Name") and otherwise use the normalized db names in the schema list above.
+    - Align the SQL with the detected plan; favor the mentioned filters, aggregations, and sorting hints.
+    - Only aggregate numeric columns; if a date column needs averaging, convert it with EXTRACT/TO_TIMESTAMP as explained earlier.
     - Ensure the query is safe, only SELECT, and references existing columns.
     Return only the SQL (no backticks, no explanations).
     """

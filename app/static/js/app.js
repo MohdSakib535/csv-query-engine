@@ -4,10 +4,13 @@ class CSVChatApp {
         this.chartInstances = new Map();
         this.datasetReady = false;
         this.messageCounter = 0;
+        this.availableDatasets = [];
+        this.selectedDatasetId = null;
 
         this.cacheElements();
         this.bindEvents();
         this.seedChat();
+        this.refreshDatasetList();
     }
 
     cacheElements() {
@@ -23,6 +26,7 @@ class CSVChatApp {
         this.questionInput = document.getElementById('questionInput');
         this.sendBtn = document.getElementById('sendBtn');
         this.useAI = document.getElementById('useAI');
+        this.datasetSelect = document.getElementById('datasetSelect');
     }
 
     bindEvents() {
@@ -40,6 +44,9 @@ class CSVChatApp {
                 this.datasetName.textContent = file.name;
             }
         });
+        if (this.datasetSelect) {
+            this.datasetSelect.addEventListener('change', () => this.handleDatasetChange());
+        }
     }
 
     seedChat() {
@@ -186,6 +193,7 @@ class CSVChatApp {
                 this.columnCountBadge.textContent = data.columns.length;
                 this.setDatasetReady(true);
                 this.addSystemMessage(`Dataset ready: ${data.columns.length} columns detected.`);
+                await this.refreshDatasetList(data.dataset_id);
             } else {
                 this.addAssistantMessage(`Upload failed: ${data.detail}`, 'error');
             }
@@ -198,6 +206,99 @@ class CSVChatApp {
         }
     }
 
+    async refreshDatasetList(preselectId = null) {
+        try {
+            const response = await fetch('/datasets');
+            if (!response.ok) {
+                throw new Error('Unable to list datasets');
+            }
+            const datasets = await response.json();
+            this.availableDatasets = datasets;
+            this.renderDatasetOptions();
+
+            let targetId = preselectId;
+            if (!targetId && this.selectedDatasetId) {
+                targetId = datasets.find((d) => d.id === this.selectedDatasetId)?.id;
+            }
+            if (!targetId) {
+                targetId = datasets.length ? datasets[0].id : null;
+            }
+
+            if (targetId) {
+                await this.selectDatasetById(targetId);
+            } else {
+                this.setDatasetReady(false);
+            }
+        } catch (error) {
+            console.error('Dataset list error:', error);
+            this.addSystemMessage('Unable to load datasets. Please try again.');
+        }
+    }
+
+    renderDatasetOptions() {
+        if (!this.datasetSelect) {
+            return;
+        }
+
+        this.datasetSelect.innerHTML = '';
+        const defaultOption = document.createElement('option');
+        defaultOption.value = '';
+        defaultOption.textContent = this.availableDatasets.length
+            ? 'Choose a dataset'
+            : 'No datasets uploaded yet';
+        this.datasetSelect.appendChild(defaultOption);
+
+        this.availableDatasets.forEach((dataset) => {
+            const option = document.createElement('option');
+            option.value = dataset.id;
+            option.textContent = `${dataset.filename} · ${dataset.columns_count} cols · ${dataset.row_count} rows`;
+            this.datasetSelect.appendChild(option);
+        });
+    }
+
+    async handleDatasetChange() {
+        if (!this.datasetSelect) {
+            return;
+        }
+        const value = this.datasetSelect.value;
+        const datasetId = value ? Number(value) : null;
+        await this.selectDatasetById(datasetId);
+    }
+
+    async selectDatasetById(datasetId) {
+        if (!datasetId) {
+            this.selectedDatasetId = null;
+            if (this.datasetSelect) {
+                this.datasetSelect.value = '';
+            }
+            this.setDatasetReady(false);
+            return;
+        }
+
+        try {
+            const response = await fetch(`/datasets/${datasetId}`);
+            if (!response.ok) {
+                throw new Error('Dataset not found');
+            }
+            const data = await response.json();
+            this.selectedDatasetId = datasetId;
+            this.schemaData = data;
+            this.renderColumns(data);
+            this.datasetName.textContent = data.filename;
+            const columnCount = data.columns.length || 0;
+            this.datasetColumns.textContent = columnCount;
+            this.columnCountBadge.textContent = columnCount;
+            if (this.datasetSelect) {
+                this.datasetSelect.value = String(datasetId);
+            }
+            this.setDatasetReady(true);
+        } catch (error) {
+            console.error('Dataset selection error:', error);
+            this.addAssistantMessage('Unable to load the selected dataset.', 'error');
+            this.setDatasetReady(false);
+        }
+    }
+
     renderColumns(data) {
         this.columnsList.innerHTML = '';
         data.columns.forEach((col) => {
@@ -205,7 +306,16 @@ class CSVChatApp {
             chip.className = 'column-chip';
 
             const left = document.createElement('div');
-            left.innerHTML = `<strong>${col.name}</strong> <span class="column-type">${col.type}</span>`;
+            const displayName = col.original_name || col.name || 'Unknown column';
+            const dbName = col.database_name || col.name || 'unknown';
+            const typeLabel = col.type || 'unknown';
+            left.innerHTML = `
+                <strong>${displayName}</strong>
+                <div class="column-meta">
+                    <span class="column-type">${typeLabel}</span>
+                    <span class="column-db-name">${dbName}</span>
+                </div>
+            `;
 
             const right = document.createElement('span');
             right.className = 'column-semantic';
@@ -226,6 +336,11 @@ class CSVChatApp {
             return;
         }
 
+        if (!this.selectedDatasetId) {
+            this.addAssistantMessage('Select a dataset from the list before querying.', 'error');
+            return;
+        }
+
         if (!question) {
             this.addAssistantMessage('Type a question to continue.', 'error');
             return;
@@ -242,7 +357,8 @@ class CSVChatApp {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     question,
-                    use_ai: useAI
+                    use_ai: useAI,
+                    dataset_id: this.selectedDatasetId
                 })
             });
 

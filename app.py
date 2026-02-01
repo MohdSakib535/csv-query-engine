@@ -3,12 +3,14 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from app.routes.upload import router as upload_router
 from app.routes.query import router as query_router
+from app.routes.datasets import router as datasets_router
 
 app = FastAPI()
 templates = Jinja2Templates(directory="app/templates")
 
 app.include_router(upload_router)
 app.include_router(query_router)
+app.include_router(datasets_router)
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):

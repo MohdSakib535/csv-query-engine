@@ -4,6 +4,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from app.routes.upload import router as upload_router
 from app.routes.query import router as query_router
+from app.routes.datasets import router as datasets_router
 from app.database.connection import create_tables, DATABASE_URL
 import logging
 import asyncio
@@ -19,6 +20,7 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 app.include_router(upload_router)
 app.include_router(query_router)
+app.include_router(datasets_router)
 
 @app.on_event("startup")
 async def startup_event():

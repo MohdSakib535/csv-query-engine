@@ -185,6 +185,42 @@ h1, h2, h3 {
     font-size: 14px;
 }
 
+.dataset-selector {
+    margin-top: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.dataset-selector select {
+    border-radius: 999px;
+    border: 1px solid var(--outline);
+    padding: 10px 16px;
+    font-size: 14px;
+    background: #fff;
+    color: var(--ink);
+    transition: border 0.2s ease;
+}
+
+.dataset-selector select:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.2);
+}
+
+.dataset-selector label {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--muted);
+}
+
+.dataset-selector-hint {
+    margin: 0;
+    font-size: 12px;
+    color: var(--muted);
+}
+
 .meta-label {
     display: block;
     color: var(--muted);
@@ -232,6 +268,19 @@ h1, h2, h3 {
 .column-type {
     color: var(--muted);
     font-size: 12px;
+}
+
+.column-meta {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    font-size: 11px;
+    color: var(--muted);
+}
+
+.column-db-name {
+    font-style: italic;
+    text-transform: lowercase;
 }
 
 .column-semantic {
