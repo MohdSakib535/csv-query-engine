@@ -82,3 +82,21 @@ async def upload_file(
     except Exception as e:
         logger.error(f"Error reading CSV: {str(e)}")
         raise HTTPException(status_code=400, detail=f"Error reading CSV: {str(e)}")
+
+
+@router.delete("/upload/{dataset_id}")
+async def delete_uploaded_dataset(
+    dataset_id: int,
+    session: AsyncSession = Depends(get_db)
+):
+    global current_dataset, current_columns_info
+
+    dataset = await db_service.delete_dataset(dataset_id, session)
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    if current_dataset is not None and current_dataset.id == dataset_id:
+        current_dataset = None
+        current_columns_info = []
+
+    return {"detail": "Dataset deleted"}

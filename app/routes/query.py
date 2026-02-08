@@ -7,8 +7,9 @@ from datetime import date, datetime
 from typing import List, Dict
 from app.database.models import Dataset
 from app.routes.upload import current_dataset, current_columns_info
-from app.utils.sql_generator import generate_sql_rule_based, generate_sql_ai, validate_sql
-from app.utils.query_planner import build_query_plan
+from app.utils.sql_generator_v2 import generate_sql, validate_sql_safety
+from app.utils.sql_generator import generate_sql_ai, validate_sql
+from app.utils.query_planner_v2 import plan_query, QueryPlan
 from app.schemas.models import QueryRequest, QueryResult
 from app.database.connection import get_db
 from app.database.service import db_service
@@ -233,79 +234,101 @@ async def run_query(
     logger.info("Received data: %s", request.dict())
     question = request.question
     use_ai = request.use_ai if request.use_ai is not None else True
-
+    
     if not question:
         logger.error("Question required")
         raise HTTPException(status_code=400, detail="Question required")
 
-    columns = [col['name'] for col in current_columns_info if col.get('name')]
-    logger.info("Columns: %s", columns)
-
-    plan = build_query_plan(question, current_columns_info)
-    logger.info("Query plan:\n%s", plan.describe(current_columns_info))
-
-    if plan.is_vague():
-        if use_ai:
-            logger.warning("Query plan is vague, but AI is enabled. Proceeding to LLM generation.")
-        else:
-            hint = _friendly_column_hint(current_columns_info)
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "Could you be more specific about what to analyze? "
-                    f"Mention at least one column (e.g., {hint}) and the desired operation or filter."
-                )
-            )
-
+    # 1. Plan Query
+    plan = plan_query(question, current_columns_info)
+    print("Generated plan:---------------------------", plan)
+    logger.info("Query plan: %s", plan.dict())
+    
+    # 2. Generate SQL
     sql = ""
+    columns = [col.get("name") for col in current_columns_info if col.get("name")]
+    if use_ai:
+        try:
+            sql = generate_sql_ai(question, current_columns_info, None)
+            logger.info("LLM-generated SQL (raw): %s", sql)
+            sql = _convert_sql_to_postgres(sql, dataset_record.table_name)
+            sql = validate_sql(sql, columns)
+            sql = _rewrite_avg_on_date_columns(sql, current_columns_info)
+            _validate_sql_schema(sql, current_columns_info, dataset_record.table_name)
+            logger.info("LLM-generated SQL (validated): %s", sql)
+        except Exception as e:
+            logger.warning(
+                "LLM SQL generation failed (%s). Falling back to rule-based SQL.",
+                str(e)
+            )
+            sql = ""
+
+    if not sql:
+        sql = generate_sql(plan, dataset_record.table_name, plan.assumptions)
+        logger.info("Rule-based SQL: %s", sql)
+        if not validate_sql_safety(sql):
+            raise HTTPException(status_code=400, detail="Generated SQL failed safety checks")
+    
+    # 3. Execute
     try:
-        if use_ai:
-            sql = generate_sql_ai(question, current_columns_info, plan)
-        else:
-            sql = generate_sql_rule_based(question, current_columns_info, plan)
-        logger.info("Generated SQL: %s", sql)
-
-        sql = _convert_sql_to_postgres(sql, dataset_record.table_name)
-        logger.info("Converted PostgreSQL SQL: %s", sql)
-        logger.info("Table name: %s", dataset_record.table_name)
-
-        sql = validate_sql(sql, columns)
-        logger.info("Validated SQL: %s", sql)
-
-        sql = _rewrite_avg_on_date_columns(sql, current_columns_info)
-        logger.info("Adjusted SQL for date averages: %s", sql)
-
-        _validate_sql_schema(sql, current_columns_info, dataset_record.table_name)
-
         raw_rows = await db_service.execute_query(sql, session)
         logger.info("Query executed successfully, rows: %s", len(raw_rows))
-
+        
+        rows = []
         if raw_rows:
             df = pd.DataFrame(raw_rows)
             df = df.where(pd.notna(df), None)
+            
+            # Normalize values
+            rows = [
+                {key: _normalize_value(value) for key, value in row.items()}
+                for row in df.to_dict('records')
+            ]
+            
+        # 4. Construct Response
+        # Create a basic answer string
+        answer = f"I found {len(rows)} result(s)."
+        if plan.time and plan.time.get('grain'):
+            answer += f" Filtered by {plan.time['grain']}."
 
-            if len(df) > 0 and df.duplicated().any():
-                grouped = df.groupby(list(df.columns)).size().reset_index(name='count')
-                grouped = grouped.sort_values('count', ascending=False)
-                grouped = grouped.where(pd.notna(grouped), None)
-                rows = [
-                    {key: _normalize_value(value) for key, value in row.items()}
-                    for row in grouped.to_dict('records')
-                ]
-                logger.info("Grouped %s rows into %s unique combinations", len(df), len(grouped))
-            else:
-                rows = [
-                    {key: _normalize_value(value) for key, value in row.items()}
-                    for row in df.to_dict('records')
-                ]
-        else:
-            rows = []
+        # Table Preview
+        table_preview = None
+        if rows:
+            table_preview = {
+                "columns": list(rows[0].keys()),
+                "rows": [list(row.values()) for row in rows[:50]] # Limit preview
+            }
+            
+        # Chart config
+        chart = None
+        if len(rows) > 0:
+            # Simple heuristic for chart
+            keys = list(rows[0].keys())
+            if len(keys) >= 2:
+                # Try to find a label column (string) and a data column (numeric)
+                label_col = next((k for k, v in rows[0].items() if isinstance(v, str)), keys[0])
+                data_col = next((k for k, v in rows[0].items() if isinstance(v, (int, float))), None)
+                
+                if data_col:
+                    chart_type = "bar"
+                    if plan.time: chart_type = "line"
+                    
+                    chart = {
+                        "type": chart_type,
+                        "x": label_col,
+                        "y": data_col,
+                        "title": f"{data_col} by {label_col}"
+                    }
 
-        rows = _add_percentage(rows, question)
-        return QueryResult(sql=sql, rows=rows)
+        return QueryResult(
+            answer=answer,
+            assumptions=plan.assumptions,
+            sql=sql,
+            table_preview=table_preview,
+            chart=chart,
+            rows=rows # For backward compatibility
+        )
 
-    except HTTPException as e:
-        raise e
     except Exception as e:
         logger.error("Error executing query: %s", str(e))
         user_friendly_error = _format_sql_error(str(e), sql, current_columns_info)

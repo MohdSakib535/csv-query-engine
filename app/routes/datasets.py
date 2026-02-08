@@ -6,6 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.connection import get_db
 from app.database.models import Dataset
+from app.database.service import db_service
+from app.routes.upload import current_dataset, current_columns_info
 from app.schemas.models import DatasetSummary, DatasetDetail
 
 router = APIRouter(prefix="/datasets")
@@ -42,3 +44,18 @@ async def get_dataset(dataset_id: int, session: AsyncSession = Depends(get_db)):
         columns=dataset.columns_info or [],
         created_at=dataset.created_at,
     )
+
+
+@router.delete("/{dataset_id}")
+async def delete_dataset(dataset_id: int, session: AsyncSession = Depends(get_db)):
+    global current_dataset, current_columns_info
+
+    dataset = await db_service.delete_dataset(dataset_id, session)
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    if current_dataset is not None and current_dataset.id == dataset_id:
+        current_dataset = None
+        current_columns_info = []
+
+    return {"detail": "Dataset deleted"}

@@ -11,6 +11,14 @@ class ColumnInfo(BaseModel):
     original_name: Optional[str] = None
     database_name: Optional[str] = None
     data_type: Optional[str] = None
+    null_ratio: Optional[float] = 0.0
+    top_values: Optional[List[str]] = []
+    distinct_count: Optional[int] = 0
+    min: Optional[float] = None
+    max: Optional[float] = None
+    mean: Optional[float] = None
+    min_date: Optional[datetime] = None
+    max_date: Optional[datetime] = None
 
 
 class DatasetSummary(BaseModel):
@@ -55,16 +63,23 @@ class QueryRequest(BaseModel):
 
 
 class QueryResult(BaseModel):
+    answer: str
+    assumptions: List[str] = []
     sql: str
-    rows: List[dict]
+    table_preview: Optional[dict] = None
+    chart: Optional[dict] = None
+    rows: List[dict] = []  # Kept for backward compatibility if needed, but table_preview is preferred
 
     class Config:
         json_schema_extra = {
             "example": {
+                "answer": "There were 15 Internet incidents in Mumbai.",
+                "assumptions": ["Assumed 'Mumbai' refers to City"],
                 "sql": "SELECT \"Service\", COUNT(*) as count FROM df WHERE \"City\" = 'Mumbai' GROUP BY \"Service\"",
-                "rows": [
-                    {"Service": "Internet", "count": 15},
-                    {"Service": "Phone", "count": 8}
-                ]
+                "table_preview": {
+                     "columns": ["Service", "count"],
+                     "rows": [["Internet", 15], ["Phone", 8]]
+                },
+                "chart": {"type": "bar", "x": "Service", "y": "count"}
             }
         }

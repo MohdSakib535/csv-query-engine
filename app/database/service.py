@@ -1,8 +1,9 @@
 import pandas as pd
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import text
+from sqlalchemy import delete
 import uuid
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from app.database.models import Dataset, DatasetSession
 
 class DatabaseService:
@@ -154,6 +155,20 @@ class DatabaseService:
         """Drop a table"""
         await session.execute(text(f"DROP TABLE IF EXISTS {table_name};"))
         await session.commit()
+
+    async def delete_dataset(self, dataset_id: int, session: AsyncSession) -> Optional[Dataset]:
+        """Delete dataset metadata, session links, and drop the backing table."""
+        dataset = await session.get(Dataset, dataset_id)
+        if not dataset:
+            return None
+
+        await self.drop_table(dataset.table_name, session)
+        await session.execute(
+            delete(DatasetSession).where(DatasetSession.dataset_id == dataset_id)
+        )
+        await session.delete(dataset)
+        await session.commit()
+        return dataset
 
 # Global instance
 db_service = DatabaseService()

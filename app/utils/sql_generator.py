@@ -73,6 +73,14 @@ def generate_sql_rule_based(
             group_by = quote_identifier(actual_col)
             select_cols = f"{quote_identifier(actual_col)}, COUNT(*) as count"
 
+    # Generic count queries without explicit column names
+    if (
+        select_cols == "*"
+        and group_by is None
+        and re.search(r"\b(how many|number of|count of|count)\b", question_lower)
+    ):
+        select_cols = "COUNT(*) as count"
+
     # Filter by city
     city_col = _find_semantic_column(columns_info, "city")
     if city_col:
